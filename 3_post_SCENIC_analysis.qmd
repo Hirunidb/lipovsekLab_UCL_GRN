@@ -4,7 +4,7 @@ format: html
 editor: visual
 ---
 
-# 0. Data & Dependancies
+# 0. Data & Dependencies
 
 ```{r}
 .libPaths('/path/to/libraries/folder/')
@@ -17,7 +17,7 @@ suppressPackageStartupMessages(c(library(dplyr),
                                ))
 
 obsMat <- readRDS('/path/to/file/obsMat.rds')
-regAUC <- readRDS("/path/to/file/regulonAUC.Rds")
+regAUC <- readRDS('/path/to/file/regulonAUC.Rds')
 regAUC <- regAUC@assays@data$AUC
 
 ```
