@@ -9,7 +9,7 @@ editor: visual
 ## 0. Dependancies
 
 ```{r, eval=FALSE}
-.libPaths('/path/to/file/libraries/folder/')
+.libPaths('/path/to/libraries/folder/')
 suppressPackageStartupMessages(c(library(anndata),
                                library(reticulate),
                                library(dplyr),
