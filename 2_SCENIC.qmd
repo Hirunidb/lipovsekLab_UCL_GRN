@@ -1,0 +1,63 @@
+# SCENIC Pipeline
+
+## 1. Data Processing
+```{r}
+rawMat <- readRDS('/path/to/file/rawCountsMat.rds') # raw counts (117k x 57k)
+obsMat <- readRDS('/path/to/file/obsMat.rds') # cell/row data (117k)
+varMat <- readRDS('/path/to/file/varMat.rds') # gene/column data of scaled/filtered matrix (37k)
+varCountsMat <- readRDS('/path/to/file/varCountsMat.rds') # gene/column data of raw counts matrix (57k)
+
+dimnames(rawMat) <- list(row.names(obsMat), row.names(varCountsMat))
+rawMat <- rawMat[, row.names(varMat)] # filter genes from 57k -> 37k
+rawMat <- t(as.matrix(rawMat)) # 37k x 117k
+saveRDS(rawMat, '/path/to/file/rawCountsMat_filt.rds')
+```
+
+## 2. SCENIC Pipeline
+```{r}
+.libPaths('/path/to/libraries/folder/')
+devtools::load_all('/path/to/file/SCENIC2/')
+
+scnOpt <- readRDS("/path/to/file/scnOpt_status0.rds")
+scnOpt@settings$nCores <- 32
+scnOpt@settings$seed <- 15
+
+# log normalised matrix
+rawMat <- readRDS('/path/to/file/rawCountsMat_filt.rds')
+rawM_cpm <- (rawMat/colSums(rawMat))*10e6
+rawM_log <- log2(rawM_cpm+1)
+
+# cell filtering
+cellList <- readRDS('/path/to/file/sampleClstGenes_2.rds')
+expM <- rawMat[, cellList] # x1800
+
+# gene filtering
+genesKept <- SCENIC2::geneFiltering(exprMat = expM, scenicOptions = scnOpt)
+expM_filt <- expM[genesKept, ]
+expM_filt_log <- log2(expM_filt+1)
+
+SCENIC2::runGenie3(exprMat = expM_filt_log, scenicOptions = scnOpt) # genie3
+
+SCENIC2::runCorrelation(exprMat_filtered = expM_filt, scenicOptions = scnOpt) # correlation matrix
+
+scnOpt <- SCENIC2::runSCENIC_1_coexNetwork2modules(scenicOptions = scnOpt) # create TF modules
+scnOpt <- SCENIC2::runSCENIC_2_createRegulons(scenicOptions = scnOpt) ## create regulons
+scnOpt <- SCENIC2::runSCENIC_3_scoreCells(scenicOptions = scnOpt, exprMat = rawM_log) 
+saveRDS(scnOpt, '/path/to/file/scnOpt_status3.rds')
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
