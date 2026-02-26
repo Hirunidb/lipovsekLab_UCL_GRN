@@ -1,0 +1,148 @@
+---
+title: "metadata.qmd"
+format: html
+editor: visual
+---
+
+# SCENIC Pipeline
+
+## 0. Dependancies
+
+```{r, eval=FALSE}
+.libPaths('/path/to/file/libraries/folder/')
+suppressPackageStartupMessages(c(library(anndata),
+                               library(reticulate),
+                               library(dplyr),
+                               library(sceasy)
+                               ))
+
+reticulate::use_condaenv('/path/to/condaenv/', required = T)
+
+```
+
+## 1. Data Acquisition
+
+-   rows : cells
+-   cols : genes
+
+```{r, eval=FALSE}
+rawData <- read_h5ad('/path/to/file/originalData.h5ad') # original h5ad file
+
+saveRDS(rawData$X, '/path/to/file/rawDataMat.rds') # processed counts
+saveRDS(rawData$obs, '/path/to/file/obsMat.rds') # obs/ row metadata
+saveRDS(rawData$var, '/path/to/file/varMat.rds') # var/ column metadata
+saveRDS(rawData$obsm$X_pca, '/path/to/file/pca_rawDataMat.rds') # PCA embeddings of raw data
+saveRDS(rawData$raw$X, '/path/to/file/rawCountsMat.rds') # raw counts
+saveRDS(rawData$raw$var, '/path/to/file/varCountsMat.rds') # variable metadata of raw counts
+saveRDS(rawData$obsm$X_umap, '/path/to/file/umap_rawDataMat.rds') # UMAP embeddings
+
+```
+
+## 2. Weight calculation
+
+-   for each cell
+
+```{r, eval=FALSE}
+rawMat <- readRDS('/path/to/file/rawDataMat.rds')
+obsMat <- readRDS('/path/to/file/obsMat.rds')
+pca <- readRDS('/path/to/file/pca_rawDataMat.rds')
+
+# Centroid
+## combine PCA embedding and cell cluster metadata
+cluster_pca <- obsMat %>%
+  dplyr::select(cluster) %>%
+  tibble::rownames_to_column() %>%
+  cbind(pca) 
+
+centroids <- cluster_pca %>%
+  dplyr::group_by(cluster) %>%
+  summarise_at(vars('1':'100'), mean)
+
+combined <- left_join(as.data.frame(cluster_pca), centroids, by= 'cluster') 
+a <- combined[,3:102]
+b <- combined[,103:202]
+
+# Euclidean distance
+## a^2 + b^2 + c^2 + ... = z^2
+eucDist <- (rowSums((a-b)**2))**0.5
+names(eucDist) <- cluster_pca$rowname
+
+# Weights
+## scale and inverse (for probability values - higher the euclidean dist, lesser the prob)
+func_min_max <- function(x){
+  (max(x) - x +1)/ sum((max(x) - x +1))
+}
+inv_prob <- func_min_max(eucDist)
+```
+
+## 3. Sampling from all cell types
+
+```{r}
+## number of cell per cluster
+typeCounts <- obsMat %>%
+  dplyr::group_by(ctype,cluster) %>%
+  count() 
+
+## sampling
+sampled_clst <- as.data.frame(inv_prob) %>%
+  tibble::rownames_to_column() %>%
+  left_join(select(cluster_pca, c(rowname, cluster)), by = 'rowname') %>%
+  slice_sample(n = min(typeCounts$n), by = cluster, weight_by = inv_prob)
+
+saveRDS(sampled_clst$rowname, '/path/to/file/sampleClstGenes_2.rds')
+
+```
+
+## 4. Sampling HC clusters
+- (GRN based on HCs)
+```{r, eval=FALSE}
+typeCounts_hc <- obsMat %>%
+  dplyr::group_by(ctype,cluster) %>%
+  dplyr::filter(cluster %in% c(4,5,8,10,16,33)) %>%
+  count()
+
+sampled_clst_hc <- as.data.frame(inv_prob) %>%
+  tibble::rownames_to_column() %>%
+  left_join(select(cluster_pca, c(rowname, cluster)), by = 'rowname') %>%
+  filter(cluster %in% c(4,5,8,10,16,33)) %>%
+  slice_sample(n = min(typeCounts_hc$n), by = cluster, weight_by = inv_prob)
+
+saveRDS(sampled_clst_hc$rowname, '/path/to/file/sampleClstGenesHC.rds')
+
+```
+
+## 5. Sampling SC clusters
+
+```{r, eval=FALSE}
+typeCounts_sc <- obsMat %>%
+  dplyr::group_by(ctype,cluster) %>%
+  dplyr::filter(ctype == 'SC') %>%
+  count()
+
+sampled_clst_sc <- as.data.frame(inv_prob) %>%
+  tibble::rownames_to_column() %>%
+  left_join(select(cluster_pca, c(rowname, cluster)), by = 'rowname') %>%
+  filter(cluster %in% typeCounts_sc$cluster) %>%
+  slice_sample(n = min(typeCounts_sc$n), by = cluster, weight_by = inv_prob)
+
+saveRDS(sampled_clst_sc$rowname, '/path/to/file/sampleClstGenesSC.rds')
+
+```
+
+## 5. Sampling MES clusters
+
+```{r, eval=FALSE}
+typeCounts_mes <- obsMat %>%
+  dplyr::group_by(ctype,cluster) %>%
+  dplyr::filter(ctype == 'MES') %>%
+  count()
+
+sampled_clst_mes <- as.data.frame(inv_prob) %>%
+  tibble::rownames_to_column() %>%
+  left_join(select(cluster_pca, c(rowname, cluster)), by = 'rowname') %>%
+  filter(cluster %in% typeCounts_mes$cluster) %>%
+  slice_sample(n = min(typeCounts_mes$n), by = cluster, weight_by = inv_prob)
+
+saveRDS(sampled_clst_mes$rowname, '/path/to/file/sampleClstGenesMES.rds')
+
+```
