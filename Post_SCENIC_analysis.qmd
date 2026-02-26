@@ -1,0 +1,408 @@
+---
+title: "Post SCENIC Analysis"
+format: html
+editor: visual
+---
+
+# 0. Data & Dependancies
+
+```{r}
+.libPaths('/path/to/libraries/folder/')
+suppressPackageStartupMessages(c(library(dplyr),
+                               library(ggplot2),
+                               library(ComplexHeatmap),
+                               library(AnnotationDbi),
+                               library(org.Mm.eg.db),
+                               library(clusterProfiler)
+                               ))
+
+obsMat <- readRDS('/path/to/file/obsMat.rds')
+regAUC <- readRDS("/path/to/file/regulonAUC.Rds")
+regAUC <- regAUC@assays@data$AUC
+
+```
+
+# 1. Overview
+## 1.1 Activity of HC, SC and MES - Heatmap
+
+```{r}
+sampleHC <- sample(readRDS('/path/to/file/sampleClstGenesHC.rds'), 50)
+sampleSC <- sample(readRDS('/path/to/file/sampleClstGenesSC.rds'), 50)
+sampleMES <- sample(readRDS('/path/to/file/sampleClstGenesMES.rds'), 50)
+
+hms <- obsMat[c(sampleHC, sampleSC, sampleMES),] %>% 
+  dplyr::select(c(sample, cluster, ctype))
+clstMeans <- regAUC[,rownames(hms)]
+grouping <- factor(hms$ctype, levels = unique(hms$ctype))
+
+scaledClstMeans <- t(scale(t(clstMeans), center = T, scale = T))
+col_fun = circlize::colorRamp2(c(min(scaledClstMeans), 0, max(scaledClstMeans)), hcl_palette = 'Blue-Red3')
+ht <- ComplexHeatmap::Heatmap(scaledClstMeans, 
+                        name = 'Activity', 
+                        col = col_fun,
+                        row_title = 'Regulon Activity (228)',
+                        row_title_gp = grid::gpar(fontsize = 18),
+                        cluster_rows = FALSE,
+                        show_row_names = FALSE,
+                        row_names_gp = grid::gpar(fontsize = 3),
+                        
+                        column_split = grouping,
+                        show_column_names = FALSE,
+                        column_names_gp = grid::gpar(fontsize = 8),
+                        show_column_dend = F,
+                        column_title_gp = grid::gpar(fontsize = 18))
+
+draw(ht, background = 'transparent')
+
+```
+
+## 1.2 Pou4f3 activity across cell types - Box plot 
+
+```{r}
+target <- c('Pou4f3')
+exp <- regAUC[stringr::str_detect(row.names(regAUC), target), ]
+
+hcMeta <- obsMat %>%
+  tibble::rownames_to_column('cellnames') %>%
+  dplyr::select(cellnames, ctype)
+
+data <- t(exp) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column('cellnames') %>%
+  dplyr::left_join(hcMeta, by = 'cellnames') 
+
+box <- data %>%
+  select(!`Pou4f3_extended (14g)`) %>%
+  filter(`Pou4f3 (12g)` > 0.00) %>%
+  ggplot2::ggplot(aes(x = ctype, 
+                      y = `Pou4f3 (12g)`)) + 
+  geom_boxplot(fill = 'deepskyblue4', 
+               outlier.colour = 'darkgoldenrod3', 
+               outlier.size = 1.8,
+               alpha = 0.7) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 15, angle = 90, vjust = 1, hjust=1),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        rect = element_rect(fill = 'transparent')) +
+  labs(x = 'Cell Type', y= 'Pou4f3 Activity')
+
+suppressWarnings(print(clusterViolin))
+  
+```
+
+# 2 Immature vs Mature HC 
+
+## 2.1 Activity across time - Heatmap
+
+```{r}
+hc <- obsMat %>% 
+  filter(ctype == 'HC') %>%
+  dplyr::select(c(sample, cluster))
+
+clst <- unique(hc$sample)[order(unique(hc$sample))]
+clstMeans <- sapply(clst, function(x){
+  cells <- row.names(filter(hc, sample == x))
+  rowMeans(regAUC[, cells])
+})
+colnames(clstMeans) <- clst
+
+scaledClstMeans <- t(scale(t(clstMeans), center = T, scale = T))
+col_fun = circlize::colorRamp2(c(min(scaledClstMeans), 0, max(scaledClstMeans)), hcl_palette = 'Blue-Red3')
+hm <- ComplexHeatmap::Heatmap(scaledClstMeans, 
+                        name = 'Activity', 
+                        col = col_fun,
+                        row_title = 'Regulon Activity (228)',
+                        row_title_gp = grid::gpar(fontsize = 18),
+                        show_row_dend = FALSE,
+                        show_row_names = FALSE,
+                        
+                        column_order = seq_len(ncol(clstMeans)),
+                        show_column_names = T,
+                        column_names_gp = grid::gpar(fontsize = 16),
+                        column_title = 'Timepoint',
+                        column_title_side = 'bottom',
+                        column_title_gp = grid::gpar(fontsize = 18))
+
+draw(hm, background = 'transparent')
+```
+
+### 2.2 Wilcoxon / Log Fold Change of M vs IM clusters
+
+```{r}
+library(ggrepel)
+im <- c(8,10)
+m <- c(4,5,16,33)
+
+# log2 Fold Change
+imCells <- rownames(hc[hc$cluster %in% im,])
+imMeans <- rowMeans(regAUC[,imCells])
+
+mCells <- rownames(hc[hc$cluster %in% m,])
+mMeans <- rowMeans(regAUC[,mCells])
+log2fc <- log2(mMeans/imMeans)
+
+# P value
+wilcox <- cbind(lapply(rownames(regAUC), function(x){
+  out <- wilcox.test(as.numeric(regAUC[x,mCells]), as.numeric(regAUC[x,imCells]), paired = F)
+  out$p.value
+}))
+log10wilcox <- -log10(unlist(wilcox))
+
+
+fc <- data.frame(
+  'Regulon' = stringr::str_split_i(rownames(regAUC), ' ', 1),
+  'log2FC' = log2fc,
+  'Pval' = log10wilcox,
+  'sig' = ifelse((unlist(wilcox <= 0.01) & log2fc <= -0.5) , 'Y', 'N')
+) 
+
+vlc <- ggplot(fc, aes(x = log2FC, y = Pval, fill = sig, color = sig)) + 
+  geom_point(size =1, alpha = 0.8) +
+  scale_fill_manual(values= c('Y' = 'deepskyblue4', 'N'= 'darkgoldenrod3'))+
+  scale_color_manual(values= c('Y' = 'deepskyblue4', 'N'= 'darkgoldenrod3'))+
+  geom_text_repel(aes(label = ifelse(sig == 'Y', Regulon, NA)),
+            size = 5, # for visualization purposes: in larger pdf format, the labels are mostly non overlapping and visible
+            hjust = 0,
+            vjust = 0) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 15),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        rect = element_rect(fill = 'transparent')) +
+  labs(x = 'log2 fold change (M vs IM)', y = '-log10(p-value)') +
+  coord_cartesian(ylim = c(0, 200))
+
+vlc
+```
+
+## 3. Type 1 vs 2 HCs
+
+### 3.1 Wilcoxon / Log Fold Change : type1 vs type2
+
+```{r}
+library(ggrepel)
+im <- 5
+m <- 4# clst 33 removed
+
+# log2 Fold Change
+imCells <- rownames(hc[hc$cluster %in% im,])
+imMeans <- rowMeans(regAUC[,imCells])
+
+mCells <- rownames(hc[hc$cluster %in% m,])
+mMeans <- rowMeans(regAUC[,mCells])
+log2fc <- log2(mMeans/imMeans)
+
+# P value
+wilcox <- cbind(lapply(rownames(regAUC), function(x){
+  out <- wilcox.test(as.numeric(regAUC[x,mCells]), as.numeric(regAUC[x,imCells]), paired = F)
+  out$p.value
+}))
+log10wilcox <- -log10(unlist(wilcox))
+### TODO: adjusted P value???
+
+fc <- data.frame(
+  'Regulon' = stringr::str_split_i(rownames(regAUC), ' ', 1),
+  'log2FC' = log2fc,
+  'Pval' = log10wilcox,
+  'sig' = ifelse((unlist(wilcox <= 0.01) & abs(log2fc) >= 0.5) , 'Y', 'N')
+) 
+
+hm <- ggplot(fc, aes(x = log2FC, y = Pval, fill = sig, color = sig )) + 
+  geom_point(size =1, alpha = 0.8) +
+  scale_fill_manual(values= c('Y' = 'deepskyblue4', 'N'= 'darkgoldenrod3'))+
+  scale_color_manual(values= c('Y' = 'deepskyblue4', 'N'= 'darkgoldenrod3'))+
+  geom_text_repel(aes(label = ifelse(sig == 'Y', Regulon, '')),
+            size = 3,
+            hjust = 0,
+            vjust = 0) +
+  theme_minimal() +
+  labs(x = 'log2 fold change (HC1 vs HC2)', y = '-log10(p-value)') +
+  coord_cartesian(ylim = c(0, 300))
+
+hm
+
+```
+
+# 4. Cluster Specificity
+
+## 4.1 Specificity Index
+-   how specific is each regulon in each cluster?
+
+```{r, eval=FALSE}
+hc <- obsMat %>% 
+  filter(ctype == 'HC') %>%
+  dplyr::select(c(sample, cluster))
+
+clst <- unique(hc$cluster)
+clstMeans <- sapply(clst, function(x){
+  cells <- row.names(filter(hc, cluster == x))
+  rowMeans(regAUC[, cells])
+})
+
+# specificity index
+regSI <- clstMeans/ rowMeans(clstMeans)
+regSI <- regSI / ncol(regSI)
+colnames(SI) <- clst
+
+# saveRDS(regSI, '/path/to/file/SpecificityIndex_HC.Rds')
+```
+
+## 4.2 SI cut off - Violin plot
+
+```{r, eval=TRUE}
+regSI <- readRDS('/path/to/file/SpecificityIndex_HC.Rds') # SI in each regulon of each cluster
+
+df <- tidyr::pivot_longer(as.data.frame(regSI), cols = colnames(regSI), names_to = 'Cluster', values_to = 'SI') 
+vlc <- df %>%
+  ggplot2::ggplot(aes(x = Cluster, y = SI)) + 
+  geom_violin(draw_quantiles = 0.75, fill = 'deepskyblue4', alpha = 0.7) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size = 18),
+        rect = element_rect(fill = 'transparent'))
+vlc
+
+```
+
+## 4.3 Upset plot - Regulon distribution
+
+```{r, eval=TRUE}
+# filter regulons for each cluster above the SI of 0.2
+topSI <- lapply(colnames(regSI), function(col){
+  names(regSI[,col])[regSI[,col] >= 0.2]
+## TODO: what is the percentage of these regulons compared to all?
+})
+names(topSI) <- colnames(regSI)
+
+# Upset plot
+mat <- make_comb_mat(topSI, mode = 'distinct')
+ups <- ComplexHeatmap::UpSet(mat,
+                      # comb_order = rev(order(comb_size(mat))),
+                      comb_col = 'deepskyblue4',
+                      lwd = 3,
+                      right_annotation = upset_right_annotation(mat, width = unit( 3, 'cm')),
+                      top_annotation = upset_top_annotation(mat, 
+                                                            add_numbers = TRUE,
+                                                            height = unit(10, 'cm'),
+                                                            annotation_name_rot = 90,
+                                                            annotation_name_gp = 12))
+
+draw(ups, background = 'transparent')
+
+```
+
+## 4.4 SI Heatmap - All Clusters
+- (cluster 33 excluded)
+
+```{r, eval=TRUE}
+regSI <- readRDS('/path/to/file/SpecificityIndex_HC.Rds')
+topSIregs <- unique(unlist(topSI[1:5]))
+mat <- regSI[topSIregs,1:5]
+
+col_fun = circlize::colorRamp2(range(mat), hcl_palette = 'Blues 3', reverse = TRUE)
+hm <- ComplexHeatmap::Heatmap(mat,
+                        col = col_fun,
+                        name = 'SI',,
+                        row_title = 'Regulon Activity (120)',
+                        row_title_gp = grid::gpar(fontsize = 18),
+                        show_row_dend = FALSE,
+                        show_column_dend = FALSE,
+                        show_row_names = FALSE,
+                        show_column_names = TRUE,
+                        column_names_rot = 0,
+                        column_names_gp = grid::gpar(fontsize = 16),
+                        column_title = 'Cluster',
+                        column_title_side = 'bottom',
+                        column_title_gp = grid::gpar(fontsize = 18))
+
+
+draw(hm, background = 'transparent')
+
+```
+
+## 4.5 Gene Ontology of top SI regulons
+
+```{r}
+varMat <- readRDS('/path/to/file/varMat.rds')
+regGenes <- readRDS('/path/to/file/regulons_forAUCell.Rds') # all regulons and corresponding genes
+
+rankedSI <- sapply(1:ncol(regSI), function(x){
+  rank <- sort(regSI[,x], decreasing = T)
+  rank[rank >= 0.2] # threshold determined in the violin plot above
+})
+names(rankedSI) <- colnames(regSI_nonExt)
+
+geneOnt <- lapply(rankedSI, function(clst){
+  
+  GO <- lapply(names(clst), function(tf){
+    geneList <- unlist(regGenes[tf], use.names = F)
+    go <- clusterProfiler::enrichGO(
+        gene= geneList,
+        OrgDb= org.Mm.eg.db,
+        keyType= 'SYMBOL',
+        ont= c('ALL'),
+        universe= row.names(varMat),
+        readable= TRUE
+    )
+  })
+  names(GO) <- names(clst)
+  GO_filt <- GO[names(GO)[sapply(GO, function(go){nrow(go@result) > 0})]] # removing regulons with 0 enrichment
+  GO_filt
+})
+
+names(geneOnt) <- names(rankedSI)
+# saveRDS(geneOnt, '/path/to/file/geneOnt.Rds')
+
+```
+
+# 5. Summary DF
+
+```{r}
+# SI of top regulons
+regSI <- readRDS('/path/to/file/SpecificityIndex_HC.Rds') # SI in each regulon of each cluster
+rankedSI <- sapply(1:ncol(regSI), function(x){
+  rank <- sort(regSI[,x], decreasing = T)
+  rank[rank >= 0.2]
+})
+names(rankedSI) <- colnames(regSI)
+
+
+# gene list of each topSI regulon
+regGenes <- readRDS('/path/to/file/regulons_forAUCell.Rds') # all regulons and corresponding genes
+rankedSIGenes <- sapply(rankedSI, function(clst){
+  regGenes[names(clst)]
+})
+
+# gene ontology of topSI regulons
+geneOnt <- readRDS('/path/to/file/geneOnt.Rds')
+
+summaryDF <- do.call(rbind, lapply(1:length(rankedSI), function(clst){
+
+  clstN <- names(rankedSI)[clst]
+  clstN <- rep(clstN, length(rankedSI[[clst]]))
+  tf <- names(rankedSI[[1]])
+  genes <- unlist(lapply(rankedSIGenes[[clst]], function(x) paste(unlist(x), collapse = ',')), recursive = F)
+
+  ont <- as.data.frame(
+    sapply(1:length(geneOnt[[clst]]), function(tf){
+      paste(geneOnt[[clst]][[tf]]@result$Description[1:3], collapse = ', ')
+    })
+  ) %>%
+    mutate('tf' = stringr::str_split_i(names(geneOnt[[clst]]), ' ', 1))
+
+  df <- data.frame(
+    'clst' = clstN,
+    'tf' = stringr::str_split_i(tf, ' ', 1),
+    'geneList' = genes
+    ) %>% 
+    left_join(ont, by= 'tf') %>%
+    rename('geneOnt' = 4)
+  df
+}))
+
+# write.csv(summaryDF, '/path/to/file/geneOntSummary.csv')
+
+```
