@@ -23,6 +23,7 @@ regAUC <- regAUC@assays@data$AUC
 ```
 
 # 1. Overview
+
 ## 1.1 Activity of HC, SC and MES - Heatmap
 
 ```{r}
@@ -56,7 +57,7 @@ draw(ht, background = 'transparent')
 
 ```
 
-## 1.2 Pou4f3 activity across cell types - Box plot 
+## 1.2 Pou4f3 activity across cell types - Box plot
 
 ```{r}
 target <- c('Pou4f3')
@@ -91,7 +92,7 @@ suppressWarnings(print(clusterViolin))
   
 ```
 
-# 2 Immature vs Mature HC 
+# 2 Immature vs Mature HC
 
 ## 2.1 Activity across time - Heatmap
 
@@ -227,6 +228,7 @@ hm
 # 4. Cluster Specificity
 
 ## 4.1 Specificity Index
+
 -   how specific is each regulon in each cluster?
 
 ```{r, eval=FALSE}
@@ -295,7 +297,8 @@ draw(ups, background = 'transparent')
 ```
 
 ## 4.4 SI Heatmap - All Clusters
-- (cluster 33 excluded)
+
+-   (cluster 33 excluded)
 
 ```{r, eval=TRUE}
 regSI <- readRDS('/path/to/file/SpecificityIndex_HC.Rds')
