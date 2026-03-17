@@ -128,7 +128,7 @@ hm <- ComplexHeatmap::Heatmap(scaledClstMeans,
 draw(hm, background = 'transparent')
 ```
 
-### 2.2 Wilcoxon / Log Fold Change of M vs IM clusters
+## 2.2 Wilcoxon / Log Fold Change of M vs IM clusters
 
 ```{r}
 library(ggrepel)
@@ -308,7 +308,7 @@ mat <- regSI[topSIregs,1:5]
 col_fun = circlize::colorRamp2(range(mat), hcl_palette = 'Blues 3', reverse = TRUE)
 hm <- ComplexHeatmap::Heatmap(mat,
                         col = col_fun,
-                        name = 'SI',,
+                        name = 'SI',
                         row_title = 'Regulon Activity (120)',
                         row_title_gp = grid::gpar(fontsize = 18),
                         show_row_dend = FALSE,
